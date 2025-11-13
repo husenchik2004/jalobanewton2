@@ -59,10 +59,11 @@ def main_menu_kb():
         resize_keyboard=True,
         keyboard=[
             [KeyboardButton(text="📋 Новая жалоба")],
+            [KeyboardButton(text="📘 Инструкция по использованию")],
             [KeyboardButton(text="📊 Статистика")]
-            # Пользователь просил убрать "❌ Отменить ввод" — если нужно вернуть, добавь сюда.
         ]
     )
+
 
 def make_categories_keyboard():
     keyboard = [
@@ -152,6 +153,22 @@ async def show_complaint_preview(message: types.Message, state: FSMContext):
 # ==========================
 # Хендлеры — стартовая логика
 # ==========================
+from aiogram.types import FSInputFile
+
+@router.message(F.text == "📘 Инструкция по использованию")
+async def send_instruction(message: types.Message):
+
+    pdf_path = "Инструкция_по_использованию.pdf"
+
+    try:
+        file = FSInputFile(pdf_path)
+        await message.answer_document(
+            document=file,
+            caption="📘 Пожалуйста, ознакомьтесь с инструкцией перед использованием бота."
+        )
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка при отправке файла: {e}")
+
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer(
