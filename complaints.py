@@ -756,9 +756,8 @@ async def receive_solution(message: types.Message, state: FSMContext):
         bot.notify_messages = {}
     bot.notify_messages[cid] = {"chat_id": group_complaints, "message_id": sent_complaint.message_id}
 
-    # --- ОБЯЗАТЕЛЬНАЯ ОЧИСТКА ---
-    bot.solution_locks[user_id] = False
-    bot.solution_waiting.pop(user_id, None)
+   # --- FSM САМА очищает состояние ---
+    await state.clear()
 
 # ==========================
 # Сообщить родителю о решении — обновление сообщения
