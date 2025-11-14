@@ -641,29 +641,14 @@ async def called_handler(callback: types.CallbackQuery):
 # Нажали "Добавить решение" — ждем ввод текста решения
 # ==========================
 @router.callback_query(F.data.startswith("solution:"))
-async def add_solution(callback: types.CallbackQuery, state: FSMContext = None):
-    bot = callback.bot
+async def add_solution(callback: types.CallbackQuery, state: FSMContext):
     cid = callback.data.split(":")[1]
-    user_id = callback.from_user.id
 
-    key = (user_id, cid)
+    # сохраняем ID жалобы в FSM
+    await state.update_data(solution_cid=cid)
+    await state.set_state(ComplaintForm.writing_solution)
 
-    # создаём хранилища, если их нет
-    if not hasattr(bot, "solution_locks"):
-        bot.solution_locks = {}
-    if not hasattr(bot, "solution_waiting"):
-        bot.solution_waiting = {}
-
-    # если уже ждём текст по ЭТОЙ жалобе
-    if key in bot.solution_waiting:
-        await callback.answer("⏳ Вы уже добавляете решение по этой жалобе.", show_alert=True)
-        return
-
-    # ставим ожидание
-    bot.solution_waiting[key] = True
-    bot.solution_locks[key] = True
-
-    # убираем кнопку
+    # удаляем кнопку
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except:
@@ -674,34 +659,24 @@ async def add_solution(callback: types.CallbackQuery, state: FSMContext = None):
 
 # ==========================
 # Обработка текста решения — отправка в РЕШЕНИЯ и ЖАЛОБЫ
-@router.message(F.text)
+@router.message(ComplaintForm.writing_solution)
 async def receive_solution(message: types.Message, state: FSMContext):
     bot = message.bot
-    user_id = message.from_user.id
 
-    # ищем все активные жалобы для пользователя
-    keys = [k for k in bot.solution_waiting.keys() if k[0] == user_id]
-
-    if not keys:
-        return  # пользователь не в режиме ввода решения
-
-    # берём ПОСЛЕДНЮЮ жалобу
-    key = keys[-1]
-    cid = key[1]
-
-    # решение принимаем ТОЛЬКО в группе решений
+    # решение принимаем только в группе решений
     if message.chat.id != bot.config["GROUP_SOLUTIONS_ID"]:
-        bot.solution_waiting.pop(key, None)
-        bot.solution_locks.pop(key, None)
+        return
+
+    data = await state.get_data()
+    cid = data.get("solution_cid")
+
+    if not cid:
         return
 
     solution_text = message.text.strip()
     if len(solution_text) < 3:
         await message.answer("❌ Решение слишком короткое, напишите подробнее.")
         return
-
-    # --- ДАЛЕЕ твой оригинальный код, НИЧЕГО НЕ МЕНЯЮ ---
-
 
     now = uz_time().strftime("%d.%m.%Y %H:%M")
 
@@ -711,10 +686,10 @@ async def receive_solution(message: types.Message, state: FSMContext):
 
     gs = GoogleSheetsClient(bot.config["SERVICE_ACCOUNT_FILE"], bot.config["GOOGLE_SHEET_ID"])
     row_index, complaint = gs.get_row_by_id(cid)
+
     if not complaint:
-        await message.answer(f"⚠️ Жалоба с ID {cid} не найдена в таблице.")
-        bot.solution_locks[user_id] = False
-        bot.solution_waiting.pop(user_id, None)
+        await message.answer(f"⚠️ Жалоба с ID {cid} не найдена.")
+        await state.clear()
         return
 
     gs.update_by_id(cid, {
@@ -724,6 +699,12 @@ async def receive_solution(message: types.Message, state: FSMContext):
         "Статус": "Ожидает уведомления"
     })
 
+    # --- ТВОЙ ОСТАЛЬНЫЙ КОД ОТПРАВКИ СООБЩЕНИЙ ---
+    # НИЧЕГО НЕ МЕНЯЙ, ВСТАВЬ СЮДА ТОЛЬКО ЛОГИКУ ОТПРАВКИ ИЗ СТАРОГО КОДА
+    # (отправка msg_text_full, msg_text_short, notify_button и очистка старых сообщений)
+
+    # ПОСЛЕ ОТПРАВКИ ОБЯЗАТЕЛЬНО:
+    await state.clear()
     call_time = complaint.get("Время обзвона", "—")
 
     msg_text_full = (
