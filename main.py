@@ -76,9 +76,6 @@ dp = Dispatcher(storage=storage)
 # Импорт хендлеров (ПОСЛЕ инициализации dp!)
 from handlers import complaints, callbacks, statistics
 
-if statistics.router.parent_router is None:
-    dp.include_router(statistics.router)
-
 
 # --------------------------------------
 # 🔹 Храним вспомогательные данные прямо в bot
