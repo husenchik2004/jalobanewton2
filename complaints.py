@@ -659,31 +659,28 @@ async def add_solution(callback: types.CallbackQuery, state: FSMContext):
 
 # ==========================
 # Обработка текста решения — отправка в РЕШЕНИЯ и ЖАЛОБЫ
-@router.message(ComplaintForm.writing_solution)
+@router.message(F.text)
 async def receive_solution(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
     bot = message.bot
 
-    # решение принимаем только в группе решений
-    # --- Принимаем решения ТОЛЬКО в группе РЕШЕНИЯ ---
-    if message.chat.id != bot.config["GROUP_SOLUTIONS_ID"]:
-        bot.solution_locks.pop(key, None)
-        bot.solution_waiting.pop(key, None)
+    # --- ищем активный ключ (user_id, cid)
+    keys = [k for k in bot.solution_waiting.keys() if k[0] == user_id]
+    if not keys:
         return
 
-# новое — получаем CID из key
-    cid = key[1]     #  <-- ✔ САМОЕ ГЛАВНОЕ ИСПРАВЛЕНИЕ
+    key = keys[-1]  # последний активный
+    cid = key[1]    # правильный CID
 
-        
-
-    data = await state.get_data()
-    cid = data.get("solution_cid")
-
-    if not cid:
+    # принимаем решение только в группе решений
+    if message.chat.id != bot.config["GROUP_SOLUTIONS_ID"]:
+        bot.solution_waiting.pop(key, None)
+        bot.solution_locks.pop(key, None)
         return
 
     solution_text = message.text.strip()
     if len(solution_text) < 3:
-        await message.answer("❌ Решение слишком короткое, напишите подробнее.")
+        await message.answer("❌ Решение слишком короткое.")
         return
 
     now = uz_time().strftime("%d.%m.%Y %H:%M")
@@ -696,8 +693,9 @@ async def receive_solution(message: types.Message, state: FSMContext):
     row_index, complaint = gs.get_row_by_id(cid)
 
     if not complaint:
-        await message.answer(f"⚠️ Жалоба с ID {cid} не найдена.")
-        await state.clear()
+        await message.answer(f"⚠️ Жалоба {cid} не найдена.")
+        bot.solution_waiting.pop(key, None)
+        bot.solution_locks.pop(key, None)
         return
 
     gs.update_by_id(cid, {
@@ -706,6 +704,13 @@ async def receive_solution(message: types.Message, state: FSMContext):
         "Время решения": now,
         "Статус": "Ожидает уведомления"
     })
+
+    # --- остальной код отправки сообщений (оставляешь как было) ---
+    # ...
+    # ...
+    # ...
+
+  
 
     # --- ТВОЙ ОСТАЛЬНЫЙ КОД ОТПРАВКИ СООБЩЕНИЙ ---
     # НИЧЕГО НЕ МЕНЯЙ, ВСТАВЬ СЮДА ТОЛЬКО ЛОГИКУ ОТПРАВКИ ИЗ СТАРОГО КОДА
@@ -766,7 +771,9 @@ async def receive_solution(message: types.Message, state: FSMContext):
 
    # --- FSM САМА очищает состояние ---
     await state.clear()
-
+  # завершаем
+    bot.solution_waiting.pop(key, None)
+    bot.solution_locks.pop(key, None)
 # ==========================
 # Сообщить родителю о решении — обновление сообщения
 # ==========================
