@@ -113,7 +113,7 @@ async def add_solution(callback: types.CallbackQuery):
 # 📥 Получение текста решения от пользователя
 # -------------------------
 @router.message(F.text)
-async def receive_solution(message: types.Message):
+async def receive_solutionВВВВ(message: types.Message):
     bot = message.bot
     uid = message.from_user.id
 
