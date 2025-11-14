@@ -74,7 +74,7 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # Импорт хендлеров (ПОСЛЕ инициализации dp!)
-from handlers import complaints, callbacks, statistics
+from handlers import complaints, statistics
 
 
 # --------------------------------------
