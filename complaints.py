@@ -653,6 +653,12 @@ async def add_solution(callback: types.CallbackQuery, state: FSMContext = None):
     if callback.bot.solution_locks.get(user_id):
         await callback.answer("⏳ Вы уже добавляете решение. Завершите ввод или подождите.", show_alert=True)
         return
+    # Хранилища состояний
+    if not hasattr(callback.bot, "solution_locks"):
+        callback.bot.solution_locks = {}
+
+    if not hasattr(callback.bot, "solution_waiting"):
+        callback.bot.solution_waiting = {}
 
     # 🔐 Устанавливаем блокировку
     callback.bot.solution_locks[user_id] = True
@@ -767,6 +773,9 @@ async def receive_solution(message: types.Message, state: FSMContext):
     if not hasattr(bot, "notify_messages"):
         bot.notify_messages = {}
     bot.notify_messages[cid] = {"chat_id": group_complaints, "message_id": sent_complaint.message_id}
+    # === Очищаем состояния пользователя ===
+    bot.solution_locks[user_id] = False
+    bot.solution_waiting.pop(user_id, None)
 
 
 # ==========================
