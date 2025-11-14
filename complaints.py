@@ -698,7 +698,7 @@ async def receive_solution(message: types.Message, state: FSMContext):
 
         return
 
-    cid = bot.solution_waiting[user_id]["cid"]
+    
     solution_text = message.text.strip()
 
     if len(solution_text) < 3:
