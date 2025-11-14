@@ -646,39 +646,32 @@ async def add_solution(callback: types.CallbackQuery, state: FSMContext = None):
     user_id = callback.from_user.id
     bot = callback.bot
 
-    # --- ГАРАНТИЯ СОЗДАНИЯ ХРАНИЛОК ---
+    # создаем контейнеры
     if not hasattr(bot, "solution_locks"):
         bot.solution_locks = {}
     if not hasattr(bot, "solution_waiting"):
         bot.solution_waiting = {}
 
-    # --- ПОЛНАЯ ОЧИСТКА ЗАВИСШИХ СОСТОЯНИЙ ---
-    bot.solution_locks[user_id] = False
-    bot.solution_waiting.pop(user_id, None)
+    key = (user_id, cid)
 
-    # --- Проверка после очистки ---
-    if bot.solution_locks.get(user_id):
-        await callback.answer("⏳ Вы уже добавляете решение. Завершите ввод или подождите.", show_alert=True)
+    # если уже ждем решение именно по этой жалобе
+    if key in bot.solution_locks:
+        await callback.answer("⏳ Вы уже добавляете решение по этой жалобе.", show_alert=True)
         return
 
-    # --- Устанавливаем новую блокировку ---
-    bot.solution_locks[user_id] = True
-    bot.solution_waiting[user_id] = {"cid": cid}
+    # ставим блокировку ТОЛЬКО на конкретную жалобу
+    bot.solution_locks[key] = True
+    bot.solution_waiting[key] = True
 
-    # --- Удаляем кнопку ---
+    # удаляем кнопку
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except:
         pass
 
-    # --- Просим текст ---
+    # спрашиваем текст
     await callback.message.answer(f"✍️ Введите текст решения по жалобе ID {cid}:")
-
-    # --- Обязательный ответ callback ---
-    try:
-        await callback.answer()
-    except:
-        pass
+    await callback.answer()
 
 # ==========================
 # Обработка текста решения — отправка в РЕШЕНИЯ и ЖАЛОБЫ
@@ -689,13 +682,20 @@ async def receive_solution(message: types.Message, state: FSMContext):
     bot = message.bot
 
     # --- Если пользователь не в процессе решения ---
-    if user_id not in bot.solution_waiting:
-        return
+    # ищем ключ (user_id, cid)
+    keys = [k for k in bot.solution_waiting.keys() if k[0] == user_id]
+    if not keys:
+            return
+
+    key = keys[-1]    # берём последнюю активную жалобу
+    cid = key[1]
+
 
     # --- Принимаем решения ТОЛЬКО в группе РЕШЕНИЯ ---
     if message.chat.id != bot.config["GROUP_SOLUTIONS_ID"]:
-        bot.solution_locks[user_id] = False
-        bot.solution_waiting.pop(user_id, None)
+        bot.solution_locks.pop(key, None)
+        bot.solution_waiting.pop(key, None)
+
         return
 
     cid = bot.solution_waiting[user_id]["cid"]
