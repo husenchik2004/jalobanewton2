@@ -664,8 +664,16 @@ async def receive_solution(message: types.Message, state: FSMContext):
     bot = message.bot
 
     # решение принимаем только в группе решений
+    # --- Принимаем решения ТОЛЬКО в группе РЕШЕНИЯ ---
     if message.chat.id != bot.config["GROUP_SOLUTIONS_ID"]:
+        bot.solution_locks.pop(key, None)
+        bot.solution_waiting.pop(key, None)
         return
+
+# новое — получаем CID из key
+    cid = key[1]     #  <-- ✔ САМОЕ ГЛАВНОЕ ИСПРАВЛЕНИЕ
+
+        
 
     data = await state.get_data()
     cid = data.get("solution_cid")
