@@ -1,2 +1,1 @@
-worker: python3 complaints.py
-
+worker: python3 main.py
