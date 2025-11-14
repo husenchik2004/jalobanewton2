@@ -79,7 +79,8 @@ async def mark_called(callback: types.CallbackQuery):
 # -------------------------
 # 💬 Нажали "Добавить решение" — помечаем ожидание в bot.solution_waiting
 # -------------------------
-@router.callback_query(F.data.startswith("solution:"))
+@router.callback_query(F.data.startswith("solution_OLD:"))
+
 async def add_solution(callback: types.CallbackQuery):
     cid = callback.data.split(":", 1)[1]
     uid = callback.from_user.id
