@@ -642,68 +642,66 @@ async def called_handler(callback: types.CallbackQuery):
 # ==========================
 @router.callback_query(F.data.startswith("solution:"))
 async def add_solution(callback: types.CallbackQuery, state: FSMContext = None):
+    bot = callback.bot
     cid = callback.data.split(":")[1]
     user_id = callback.from_user.id
-    bot = callback.bot
 
-    # создаем контейнеры
+    key = (user_id, cid)
+
+    # создаём хранилища, если их нет
     if not hasattr(bot, "solution_locks"):
         bot.solution_locks = {}
     if not hasattr(bot, "solution_waiting"):
         bot.solution_waiting = {}
 
-    key = (user_id, cid)
-
-    # если уже ждем решение именно по этой жалобе
-    if key in bot.solution_locks:
+    # если уже ждём текст по ЭТОЙ жалобе
+    if key in bot.solution_waiting:
         await callback.answer("⏳ Вы уже добавляете решение по этой жалобе.", show_alert=True)
         return
 
-    # ставим блокировку ТОЛЬКО на конкретную жалобу
-    bot.solution_locks[key] = True
+    # ставим ожидание
     bot.solution_waiting[key] = True
+    bot.solution_locks[key] = True
 
-    # удаляем кнопку
+    # убираем кнопку
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except:
         pass
 
-    # спрашиваем текст
     await callback.message.answer(f"✍️ Введите текст решения по жалобе ID {cid}:")
     await callback.answer()
 
 # ==========================
 # Обработка текста решения — отправка в РЕШЕНИЯ и ЖАЛОБЫ
-# ==========================
 @router.message(F.text)
 async def receive_solution(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
     bot = message.bot
+    user_id = message.from_user.id
 
-    # --- Если пользователь не в процессе решения ---
-    # ищем ключ (user_id, cid)
+    # ищем все активные жалобы для пользователя
     keys = [k for k in bot.solution_waiting.keys() if k[0] == user_id]
-    if not keys:
-            return
 
-    key = keys[-1]    # берём последнюю активную жалобу
+    if not keys:
+        return  # пользователь не в режиме ввода решения
+
+    # берём ПОСЛЕДНЮЮ жалобу
+    key = keys[-1]
     cid = key[1]
 
-
-    # --- Принимаем решения ТОЛЬКО в группе РЕШЕНИЯ ---
+    # решение принимаем ТОЛЬКО в группе решений
     if message.chat.id != bot.config["GROUP_SOLUTIONS_ID"]:
-        bot.solution_locks.pop(key, None)
         bot.solution_waiting.pop(key, None)
-
+        bot.solution_locks.pop(key, None)
         return
 
-    
     solution_text = message.text.strip()
-
     if len(solution_text) < 3:
         await message.answer("❌ Решение слишком короткое, напишите подробнее.")
         return
+
+    # --- ДАЛЕЕ твой оригинальный код, НИЧЕГО НЕ МЕНЯЮ ---
+
 
     now = uz_time().strftime("%d.%m.%Y %H:%M")
 
