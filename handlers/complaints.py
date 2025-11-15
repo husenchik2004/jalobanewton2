@@ -623,97 +623,76 @@ def ensure_solution_map(bot):
 # ---------------------------------------------------------
 @router.callback_query(F.data.startswith("called:"))
 async def called_handler(callback: types.CallbackQuery):
-    try:
-        await callback.answer("⏳ Обрабатываю...")
-    except:
-        pass
-
     bot = callback.bot
+
     cid = callback.data.split(":", 1)[1]
     now = uz_time().strftime("%d.%m.%Y %H:%M")
 
-    # защита от повторов
+    await callback.answer("⏳ Обрабатываю...")
+
+    # защита от повторных нажатий
     if cid in bot._called_ids:
-        await callback.answer("Уже обработано.")
         return
     bot._called_ids.add(cid)
 
     # обновляем таблицу
-    try:
-        gs = GoogleSheetsClient(bot.config["SERVICE_ACCOUNT_FILE"], bot.config["GOOGLE_SHEET_ID"])
-        gs.update_by_id(cid, {"Статус": "Принята", "Время обзвона": now})
-    except Exception as e:
-        print("GS update error:", e)
+    gs = GoogleSheetsClient(bot.config["SERVICE_ACCOUNT_FILE"], bot.config["GOOGLE_SHEET_ID"])
+    gs.update_by_id(cid, {
+        "Статус": "Принята",
+        "Время обзвона": now
+    })
 
-    # 1) Попытка обновить (и убрать кнопку) в исходном сообщении в группе "ЖАЛОБЫ"
-    try:
-        msg_info = bot.notify_messages.get(cid) if hasattr(bot, "notify_messages") else None
-        if msg_info:
-            # получаем текст (без падений) и редактируем
-            try:
-                # edit_caption если было документ/медиа с caption — но чаще это text
-                await bot.edit_message_text(
-                    (await bot.get_message(msg_info["chat_id"], msg_info["message_id"])).text + f"\n☎️ <b>Перезвонили:</b> {now}",
-                    chat_id=msg_info["chat_id"],
-                    message_id=msg_info["message_id"],
-                    parse_mode="HTML",
+    # ---- НАЙТИ правильное исходное сообщение ----
+    saved = bot.notify_messages.get(cid)
+    if saved:
+        try:
+            msg = await bot.get_message(saved["chat_id"], saved["message_id"])
+            old = msg.caption or msg.text or ""
+
+            updated = old + f"\n☎️ <b>Перезвонили:</b> {now}"
+
+            if msg.caption:
+                await bot.edit_message_caption(
+                    chat_id=saved["chat_id"],
+                    message_id=saved["message_id"],
+                    caption=updated,
                     reply_markup=None
                 )
-            except Exception:
-                try:
-                    # fallback: попытка edit_caption (если это было media)
-                    await bot.edit_message_caption(
-                        (await bot.get_message(msg_info["chat_id"], msg_info["message_id"])).caption + f"\n☎️ <b>Перезвонили:</b> {now}",
-                        chat_id=msg_info["chat_id"],
-                        message_id=msg_info["message_id"],
-                        parse_mode="HTML",
-                        reply_markup=None
-                    )
-                except Exception as e:
-                    # не критично — просто логируем
-                    print("Failed to update original complaint message:", e)
-        else:
-            # fallback: редактируем callback.message (если кнопка там)
-            try:
-                old = callback.message.caption or callback.message.text or ""
-                updated = old + f"\n☎️ <b>Перезвонили:</b> {now}"
-                if callback.message.caption:
-                    await callback.message.edit_caption(updated, parse_mode="HTML", reply_markup=None)
-                else:
-                    await callback.message.edit_text(updated, parse_mode="HTML", reply_markup=None)
-            except Exception:
-                pass
-    except Exception as e:
-        print("Error updating original message:", e)
+            else:
+                await bot.edit_message_text(
+                    updated,
+                    chat_id=saved["chat_id"],
+                    message_id=saved["message_id"],
+                    reply_markup=None
+                )
+        except Exception as e:
+            print("Failed to edit original message:", e)
 
-    # 2) Формируем updated текст для пересылки в РЕШЕНИЯ
-    old = callback.message.caption or callback.message.text or ""
-    updated = old + f"\n☎️ <b>Перезвонили:</b> {now}"
+    # ---- Переслать в РЕШЕНИЯ ----
 
-    # 3) Пересылаем в РЕШЕНИЯ (с медиа если есть)
+    updated = (callback.message.caption or callback.message.text or "") + \
+              f"\n☎️ <b>Перезвонили:</b> {now}"
+
     reply_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Добавить решение", callback_data=f"solution:{cid}")]
     ])
-    group_solutions = bot.config["GROUP_SOLUTIONS_ID"]
 
-    try:
-        if callback.message.photo:
-            media_id = callback.message.photo[-1].file_id
-            sent = await bot.send_photo(group_solutions, media_id, caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}", parse_mode="HTML", reply_markup=reply_markup)
-        elif getattr(callback.message, "video", None):
-            media_id = callback.message.video.file_id
-            sent = await bot.send_video(group_solutions, media_id, caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}", parse_mode="HTML", reply_markup=reply_markup)
-        elif getattr(callback.message, "document", None):
-            media_id = callback.message.document.file_id
-            sent = await bot.send_document(group_solutions, media_id, caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}", parse_mode="HTML", reply_markup=reply_markup)
-        else:
-            sent = await bot.send_message(group_solutions, f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}", parse_mode="HTML", reply_markup=reply_markup)
-    except Exception as e:
-        await callback.answer(f"⚠️ Ошибка при пересылке в РЕШЕНИЯ: {e}")
-        return
+    group = bot.config["GROUP_SOLUTIONS_ID"]
 
-    # сохраняем ID сообщения в решения, чтобы при добавлении решения можно было удалить/заменить
-    bot.solution_messages[cid] = {"chat_id": group_solutions, "message_id": sent.message_id}
+    if callback.message.photo:
+        media_id = callback.message.photo[-1].file_id
+        sent = await bot.send_photo(group, media_id, caption=updated, reply_markup=reply_markup)
+    elif getattr(callback.message, "video", None):
+        sent = await bot.send_video(group, callback.message.video.file_id, caption=updated, reply_markup=reply_markup)
+    elif getattr(callback.message, "document", None):
+        sent = await bot.send_document(group, callback.message.document.file_id, caption=updated, reply_markup=reply_markup)
+    else:
+        sent = await bot.send_message(group, updated, reply_markup=reply_markup)
+
+    bot.solution_messages[cid] = {
+        "chat_id": sent.chat.id,
+        "message_id": sent.message_id
+    }
 
     await callback.answer("✅ Жалоба передана в «РЕШЕНИЯ».")
 
@@ -743,7 +722,6 @@ async def add_solution(callback: types.CallbackQuery):
     await callback.message.answer(f"✍️ Введите текст решения по жалобе ID {cid}:")
     await callback.answer()
 
-
 # ---------------------------------------------------------
 # 💬 Принимаем текст решения
 # ---------------------------------------------------------
@@ -766,7 +744,7 @@ async def receive_solution(message: types.Message):
 
     # --- Удаляем сообщение "Введите текст решения" ---
     try:
-        await message.bot.delete_message(
+        await bot.delete_message(
             chat_id=message.chat.id,
             message_id=message.message_id - 1
         )
@@ -775,20 +753,19 @@ async def receive_solution(message: types.Message):
 
     # --- Удаляем сообщение пользователя с решением ---
     try:
-        await message.bot.delete_message(
+        await bot.delete_message(
             chat_id=message.chat.id,
             message_id=message.message_id
         )
     except:
         pass
 
-
     solution_text = message.text.strip()
     if len(solution_text) < 3:
         await message.answer("❌ Решение слишком короткое.")
         return
 
-    # берём жалобу
+    # загружаем жалобу
     gs = GoogleSheetsClient(bot.config["SERVICE_ACCOUNT_FILE"], bot.config["GOOGLE_SHEET_ID"])
     _, complaint = gs.get_row_by_id(cid)
 
@@ -810,9 +787,13 @@ async def receive_solution(message: types.Message):
         "Статус": "Ожидает уведомления"
     })
 
-    # отправляем полное сообщение
+    # данные отправителя жалобы
+    sender = complaint.get("Отправитель", "—")
+    sender_uid = complaint.get("User ID", "—")
+
     call_time = complaint.get("Время обзвона", "—")
 
+    # новое сообщение в группу РЕШЕНИЯ
     full = (
         f"📤 <b>Жалоба ID {cid}</b> передана в <b>«РЕШЕНИЯ»</b>\n\n"
         f"🏫 <b>Филиал:</b> {complaint.get('Филиал')}\n"
@@ -821,12 +802,15 @@ async def receive_solution(message: types.Message):
         f"☎️ <b>Телефон:</b> {complaint.get('Телефон')}\n"
         f"📂 <b>Категория:</b> {complaint.get('Категория')}\n"
         f"✍️ <b>Жалоба:</b> {complaint.get('Жалоба')}\n\n"
+        f"👤 <b>Отправитель:</b> {sender}\n"
+        f"🆔 <code>{sender_uid}</code>\n\n"
         f"☎️ <b>Перезвонили:</b> {call_time}\n"
         f"💬 <b>Решение:</b> {solution_text}\n"
         f"👤 <b>Ответственный:</b> {responsible_display}\n"
         f"🕒 <b>Время решения:</b> {now}"
     )
-# --- Удаляем старое сообщение, если было ---
+
+    # удаляем старое сообщение в РЕШЕНИЯХ (если есть)
     old = bot.solution_messages.get(cid)
     if old:
         try:
@@ -834,10 +818,11 @@ async def receive_solution(message: types.Message):
         except:
             pass
 
+    # отправляем новое
     sent_full = await bot.send_message(bot.config["GROUP_SOLUTIONS_ID"], full, parse_mode="HTML")
     bot.solution_messages[cid] = {"chat_id": sent_full.chat.id, "message_id": sent_full.message_id}
 
-    # короткое сообщение в группу ЖАЛОБЫ
+    # сообщение в группу ЖАЛОБЫ
     short = (
         "<b>🟩РЕШЕНИЕ ПО ЖАЛОБЕ ГОТОВО🟩</b>\n\n"
         f"📘 <b>ID жалобы:</b> {cid}\n\n"
@@ -845,7 +830,7 @@ async def receive_solution(message: types.Message):
         f"👤 <b>Ответственный:</b> {responsible_display}\n"
         f"⏱ <b>Время решения:</b> {now}\n\n"
         "☎️ <b>Требуется уведомить родителя о принятом решении.</b>"
-    ) 
+    )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📨 Сообщили родителю!", callback_data=f"notify_parent:{cid}")]
@@ -862,7 +847,6 @@ async def receive_solution(message: types.Message):
 
     # очистка
     bot.active_solutions.pop(user_id, None)
-
 
 # ---------------------------------------------------------
 # 📩 Сообщили родителю
