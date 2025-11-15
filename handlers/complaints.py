@@ -618,27 +618,31 @@ async def called_handler(callback: types.CallbackQuery):
     except:
         pass
 
+    bot = callback.bot
     cid = callback.data.split(":", 1)[1]
     now = uz_time().strftime("%d.%m.%Y %H:%M")
 
     # защита от повторов
-    if cid in callback.bot._called_ids:
+    if cid in bot._called_ids:
         await callback.answer("Уже обработано.")
         return
-    callback.bot._called_ids.add(cid)
+    bot._called_ids.add(cid)
 
-    # обновление таблицы
+    # обновляем таблицу
     gs = GoogleSheetsClient(
-        callback.bot.config["SERVICE_ACCOUNT_FILE"],
-        callback.bot.config["GOOGLE_SHEET_ID"]
+        bot.config["SERVICE_ACCOUNT_FILE"],
+        bot.config["GOOGLE_SHEET_ID"]
     )
     gs.update_by_id(cid, {"Статус": "Принята", "Время обзвона": now})
 
-    # текст жалобы
-    old = callback.message.caption or callback.message.text or ""
-    updated = old + f"\n☎️ <b>Перезвонили:</b> {now}"
+    # 🔥 ГЛАВНОЕ: правильно получить текст (caption для медиа, text для обычного)
+    old_text = callback.message.caption if callback.message.caption else callback.message.text
+    if not old_text:
+        old_text = "📋 Жалоба"  # fallback
 
-    # удаляем кнопку в ЖАЛОБАХ
+    updated = old_text + f"\n☎️ <b>Перезвонили:</b> {now}"
+
+    # 🔥 Удаляем кнопку в группе жалоб корректно
     try:
         if callback.message.caption:
             await callback.message.edit_caption(updated, parse_mode="HTML", reply_markup=None)
@@ -647,18 +651,23 @@ async def called_handler(callback: types.CallbackQuery):
     except:
         pass
 
-    # отправляем в РЕШЕНИЯ
+    # --- Формируем кнопку "Добавить решение" ---
     reply_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Добавить решение", callback_data=f"solution:{cid}")]
     ])
 
-    group_solutions = callback.bot.config["GROUP_SOLUTIONS_ID"]
-    
+    group_solutions = bot.config["GROUP_SOLUTIONS_ID"]
 
-    # если жалоба была с фото
+    # ----------------------------------------------------
+    # 🔥 ПЕРЕСЫЛАЕМ МЕДИА КОРРЕКТНО В ГРУППУ «РЕШЕНИЯ»
+    # ----------------------------------------------------
+
+    sent = None
+
+    # PHOTO
     if callback.message.photo:
         media_id = callback.message.photo[-1].file_id
-        sent = await callback.bot.send_photo(
+        sent = await bot.send_photo(
             group_solutions,
             media_id,
             caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
@@ -666,10 +675,10 @@ async def called_handler(callback: types.CallbackQuery):
             reply_markup=reply_markup
         )
 
-    # если жалоба была с видео
+    # VIDEO
     elif getattr(callback.message, "video", None):
         media_id = callback.message.video.file_id
-        sent = await callback.bot.send_video(
+        sent = await bot.send_video(
             group_solutions,
             media_id,
             caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
@@ -677,10 +686,10 @@ async def called_handler(callback: types.CallbackQuery):
             reply_markup=reply_markup
         )
 
-# если жалоба была с документом
+    # DOCUMENT (PDF, DOCX, JPG-переданные как документ, PNG и т.д.)
     elif getattr(callback.message, "document", None):
         media_id = callback.message.document.file_id
-        sent = await callback.bot.send_document(
+        sent = await bot.send_document(
             group_solutions,
             media_id,
             caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
@@ -688,21 +697,22 @@ async def called_handler(callback: types.CallbackQuery):
             reply_markup=reply_markup
         )
 
-# если медиа не было
+    # Без медиа — обычный текст
     else:
-        sent = await callback.bot.send_message(
+        sent = await bot.send_message(
             group_solutions,
             f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
             parse_mode="HTML",
             reply_markup=reply_markup
         )
 
-
-    # сохраняем ID сообщения
-    callback.bot.solution_messages[cid] = {"chat_id": group_solutions, "message_id": sent.message_id}
+    # сохраняем ID сообщения для дальнейшего обновления при добавлении решения
+    bot.solution_messages[cid] = {
+        "chat_id": sent.chat.id,
+        "message_id": sent.message_id
+    }
 
     await callback.answer("✅ Жалоба передана в «РЕШЕНИЯ».")
-    
 
 # ---------------------------------------------------------
 # 💬 Нажали «Добавить решение»
@@ -795,7 +805,6 @@ async def receive_solution(message: types.Message):
         f"🕒 <b>Время решения:</b> {now}"
     )
 # --- Удаляем старое сообщение, если было ---
-    # --- Удаляем старое сообщение в РЕШЕНИЯ ---
     old = bot.solution_messages.get(cid)
     if old:
         try:
@@ -803,60 +812,8 @@ async def receive_solution(message: types.Message):
         except:
             pass
 
-    group_solutions = bot.config["GROUP_SOLUTIONS_ID"]
-
-# --- Определяем медиа из исходного сообщения (которое было перенесено в РЕШЕНИЯ) ---
-    media_to_send = None
-    if entry.get("media_type") and entry.get("media_id"):
-        media_to_send = (entry["media_type"], entry["media_id"])
-    else:
-        # пробуем взять из callback.message (на случай старого формата)
-        if "photo" in message.reply_to_message and message.reply_to_message.photo:
-            media_to_send = ("photo", message.reply_to_message.photo[-1].file_id)
-        elif hasattr(message.reply_to_message, "video") and message.reply_to_message.video:
-            media_to_send = ("video", message.reply_to_message.video.file_id)
-        elif hasattr(message.reply_to_message, "document") and message.reply_to_message.document:
-            media_to_send = ("document", message.reply_to_message.document.file_id)
-        else:
-            media_to_send = ("text", None)
-
-    # --- Отправляем новое сообщение В РЕШЕНИЯ с медиа ---
-    if media_to_send[0] == "photo":
-        sent_full = await bot.send_photo(
-            group_solutions,
-            media_to_send[1],
-            caption=full,
-            parse_mode="HTML"
-        )
-
-    elif media_to_send[0] == "video":
-        sent_full = await bot.send_video(
-            group_solutions,
-            media_to_send[1],
-            caption=full,
-            parse_mode="HTML"
-        )
-
-    elif media_to_send[0] == "document":
-        sent_full = await bot.send_document(
-            group_solutions,
-            media_to_send[1],
-            caption=full,
-            parse_mode="HTML"
-        )
-
-    else:
-        sent_full = await bot.send_message(
-            group_solutions,
-            full,
-            parse_mode="HTML"
-        )
-
-# --- Сохраняем новое сообщение ---
-    bot.solution_messages[cid] = {
-        "chat_id": sent_full.chat.id,
-        "message_id": sent_full.message_id
-    }
+    sent_full = await bot.send_message(bot.config["GROUP_SOLUTIONS_ID"], full, parse_mode="HTML")
+    bot.solution_messages[cid] = {"chat_id": sent_full.chat.id, "message_id": sent_full.message_id}
 
     # короткое сообщение в группу ЖАЛОБЫ
     short = (
