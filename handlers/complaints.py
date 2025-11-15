@@ -795,6 +795,7 @@ async def receive_solution(message: types.Message):
         f"🕒 <b>Время решения:</b> {now}"
     )
 # --- Удаляем старое сообщение, если было ---
+    # --- Удаляем старое сообщение в РЕШЕНИЯ ---
     old = bot.solution_messages.get(cid)
     if old:
         try:
@@ -802,8 +803,60 @@ async def receive_solution(message: types.Message):
         except:
             pass
 
-    sent_full = await bot.send_message(bot.config["GROUP_SOLUTIONS_ID"], full, parse_mode="HTML")
-    bot.solution_messages[cid] = {"chat_id": sent_full.chat.id, "message_id": sent_full.message_id}
+    group_solutions = bot.config["GROUP_SOLUTIONS_ID"]
+
+# --- Определяем медиа из исходного сообщения (которое было перенесено в РЕШЕНИЯ) ---
+    media_to_send = None
+    if entry.get("media_type") and entry.get("media_id"):
+        media_to_send = (entry["media_type"], entry["media_id"])
+    else:
+        # пробуем взять из callback.message (на случай старого формата)
+        if "photo" in message.reply_to_message and message.reply_to_message.photo:
+            media_to_send = ("photo", message.reply_to_message.photo[-1].file_id)
+        elif hasattr(message.reply_to_message, "video") and message.reply_to_message.video:
+            media_to_send = ("video", message.reply_to_message.video.file_id)
+        elif hasattr(message.reply_to_message, "document") and message.reply_to_message.document:
+            media_to_send = ("document", message.reply_to_message.document.file_id)
+        else:
+            media_to_send = ("text", None)
+
+    # --- Отправляем новое сообщение В РЕШЕНИЯ с медиа ---
+    if media_to_send[0] == "photo":
+        sent_full = await bot.send_photo(
+            group_solutions,
+            media_to_send[1],
+            caption=full,
+            parse_mode="HTML"
+        )
+
+    elif media_to_send[0] == "video":
+        sent_full = await bot.send_video(
+            group_solutions,
+            media_to_send[1],
+            caption=full,
+            parse_mode="HTML"
+        )
+
+    elif media_to_send[0] == "document":
+        sent_full = await bot.send_document(
+            group_solutions,
+            media_to_send[1],
+            caption=full,
+            parse_mode="HTML"
+        )
+
+    else:
+        sent_full = await bot.send_message(
+            group_solutions,
+            full,
+            parse_mode="HTML"
+        )
+
+# --- Сохраняем новое сообщение ---
+    bot.solution_messages[cid] = {
+        "chat_id": sent_full.chat.id,
+        "message_id": sent_full.message_id
+    }
 
     # короткое сообщение в группу ЖАЛОБЫ
     short = (

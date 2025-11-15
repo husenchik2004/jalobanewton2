@@ -85,6 +85,10 @@ bot.solution_waiting = {}
 bot._sent_ids = set()
 bot._called_ids = set()
 bot.solution_messages = {}
+bot.notify_messages = {}
+bot.active_solutions = {}              # <- чтобы не падало в receive_solution
+bot.solution_waiting = {}              # <- дублируем для безопасности
+
 # --------------------------------------
 # 🔹 Общая конфигурация (для всех модулей)
 # --------------------------------------
