@@ -379,7 +379,7 @@ async def skip_media_request(callback: types.CallbackQuery, state: FSMContext):
 # ==========================
 # Получаем фото/видео
 # ==========================
-@router.message(ComplaintForm.awaiting_media, F.photo | F.video)
+@router.message(ComplaintForm.awaiting_media, F.photo | F.video | F.document)
 async def handle_media(message: types.Message, state: FSMContext):
     data = await state.get_data()
     awaiting = data.get("awaiting_media")
@@ -389,12 +389,23 @@ async def handle_media(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Чтобы прикрепить медиа к жалобе, нажмите соответствующую кнопку.")
         return
 
+    # Фото пришло как photo (telegram auto-compressed)
     if message.photo:
         file_id = message.photo[-1].file_id
-        await state.update_data(media_type="photo", media_id=file_id)
+        await state.update_data(media_type="photo", media_id=file_id, media_mime="image/jpeg")
+    # Видео
     elif message.video:
         file_id = message.video.file_id
-        await state.update_data(media_type="video", media_id=file_id)
+        await state.update_data(media_type="video", media_id=file_id, media_mime="video/mp4")
+    # Документ: может быть jpg/png/pdf и т.д.
+    elif message.document:
+        mime = getattr(message.document, "mime_type", "") or ""
+        file_id = message.document.file_id
+        # Сохраняем как document — при отправке решим как пересылать
+        await state.update_data(media_type="document", media_id=file_id, media_mime=mime)
+    else:
+        await message.answer("⚠️ Не удалось распознать файл. Попробуйте отправить как фото или файл.")
+        return
 
     # сброс ожидания медиа
     await state.update_data(awaiting_media=None)
@@ -408,6 +419,7 @@ async def handle_media(message: types.Message, state: FSMContext):
 
     await message.answer("✅ Медиа добавлено.")
     await show_complaint_preview(message, state)
+
 
 @router.message(ComplaintForm.awaiting_media, F.text)
 async def awaiting_media_text(message: types.Message, state: FSMContext):
@@ -525,21 +537,53 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
     ])
 
     try:
+        # Фото
         if media_type == "photo":
-            await callback.bot.send_photo(group_id, media_id, caption=msg, parse_mode="HTML", reply_markup=kb)
-        elif media_type == "video":
-            await callback.bot.send_video(group_id, media_id, caption=msg, parse_mode="HTML", reply_markup=kb)
-        else:
-            await callback.bot.send_message(group_id, msg, parse_mode="HTML", reply_markup=kb)
+            await callback.bot.send_photo(
+                group_id,
+                media_id,
+                caption=msg,
+                parse_mode="HTML",
+                reply_markup=kb
+            )
 
+        # Видео
+        elif media_type == "video":
+            await callback.bot.send_video(
+                group_id,
+                media_id,
+                caption=msg,
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+
+        # Файлы: JPG/PNG/PDF/HEIC/DOC — всё то, что приходит как DOCUMENT
+        elif media_type == "document":
+            await callback.bot.send_document(
+                group_id,
+                media_id,
+                caption=msg,
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+
+        # Если медиа нет — обычный текст
+        else:
+            await callback.bot.send_message(
+                group_id,
+                msg,
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+
+        # Убираем клавиатуру и завершаем
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer("✅ Жалоба успешно отправлена и сохранена.", reply_markup=main_menu_kb())
         await state.clear()
+
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке в группу: {e}")
         await state.update_data(sending_in_progress=False)
-
-
 # ---------------------------------------------------------
 # ✔ Память решений — хранит активные решения
 # ---------------------------------------------------------
@@ -600,12 +644,50 @@ async def called_handler(callback: types.CallbackQuery):
     ])
 
     group_solutions = callback.bot.config["GROUP_SOLUTIONS_ID"]
-    sent = await callback.bot.send_message(
-        group_solutions,
-        f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
+    
+
+    # если жалоба была с фото
+    if callback.message.photo:
+        media_id = callback.message.photo[-1].file_id
+        sent = await callback.bot.send_photo(
+            group_solutions,
+            media_id,
+            caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+    # если жалоба была с видео
+    elif getattr(callback.message, "video", None):
+        media_id = callback.message.video.file_id
+        sent = await callback.bot.send_video(
+            group_solutions,
+            media_id,
+            caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+# если жалоба была с документом
+    elif getattr(callback.message, "document", None):
+        media_id = callback.message.document.file_id
+        sent = await callback.bot.send_document(
+            group_solutions,
+            media_id,
+            caption=f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+# если медиа не было
+    else:
+        sent = await callback.bot.send_message(
+            group_solutions,
+            f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
 
     # сохраняем ID сообщения
     callback.bot.solution_messages[cid] = {"chat_id": group_solutions, "message_id": sent.message_id}
@@ -709,7 +791,7 @@ async def receive_solution(message: types.Message):
 
     # короткое сообщение в группу ЖАЛОБЫ
     short = (
-        "📨 <b>🟩🟩🟩РЕШЕНИЕ ПО ЖАЛОБЕ ГОТОВО🟩🟩🟩</b>\n\n"
+        "<b>🟩РЕШЕНИЕ ПО ЖАЛОБЕ ГОТОВО🟩</b>\n\n"
         f"📘 <b>ID жалобы:</b> {cid}\n\n"
         f"💬 <b>Решение:</b> {solution_text}\n"
         f"👤 <b>Ответственный:</b> {responsible_display}\n"
