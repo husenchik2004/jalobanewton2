@@ -93,19 +93,20 @@ def generate_pretty_id(gs_client: GoogleSheetsClient) -> str:
         print(f"⚠️ generate_pretty_id error: {e}")
         return f"A-{uz_time().strftime('%y%m%d%H%M%S')}"
 
-
 # ==========================
-# Показ предпросмотра (определён ДО обработчиков, чтобы не было NameError)
+# 📋 Показ предпросмотра жалобы с поддержкой фото/видео/документов
 # ==========================
 async def show_complaint_preview(message: types.Message, state: FSMContext):
     data = await state.get_data()
 
-    # Получаем новый ID через gs (чтобы не коллизировало)
+    # ID без коллизий
     try:
-        gs_client = GoogleSheetsClient(message.bot.config["SERVICE_ACCOUNT_FILE"], message.bot.config["GOOGLE_SHEET_ID"])
+        gs_client = GoogleSheetsClient(
+            message.bot.config["SERVICE_ACCOUNT_FILE"],
+            message.bot.config["GOOGLE_SHEET_ID"]
+        )
         complaint_id = generate_pretty_id(gs_client)
     except Exception:
-        # fallback
         complaint_id = f"A-{uz_time().strftime('%y%m%d%H%M%S')}"
 
     await state.update_data(id=complaint_id)
@@ -116,19 +117,21 @@ async def show_complaint_preview(message: types.Message, state: FSMContext):
     phone = data.get("phone", "-")
     category = data.get("category", "-")
     description = data.get("description", "-")
+
     media_type = data.get("media_type")
     media_id = data.get("media_id")
 
-    phone_display = phone or "—"
+    media_status = "📎 Медиа: <i>прикреплено</i>" if media_id else "📎 Медиа: <i>нет</i>"
 
     preview = (
         "<b>📋 Проверьте данные жалобы:</b>\n\n"
         f"🏫 Филиал: {branch}\n"
         f"👤 Родитель: {parent or '—'}\n"
         f"🧒 Ученик: {student or '—'}\n"
-        f"☎️ Телефон: {phone_display}\n"
+        f"☎️ Телефон: {phone or '—'}\n"
         f"📂 Категория: {category}\n"
-        f"✍️ Жалоба: {description}"
+        f"✍️ Жалоба: {description}\n\n"
+        f"{media_status}"
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -136,22 +139,28 @@ async def show_complaint_preview(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="✏️ Изменить анкету", callback_data="edit_form")]
     ])
 
-    # Попытка убрать клавиатуру у предыдущего сообщения с клавиатурой (если это было наше сообщение)
+    # Убираем клавиатуру прошлого сообщения
     try:
-        # если callback message имеет reply_markup - можно очистить (best-effort)
         await message.edit_reply_markup(reply_markup=None)
     except:
         pass
 
+    # ---------- Отправляем предпросмотр с медиа ----------
     try:
         if media_type == "photo":
             await message.answer_photo(media_id, caption=preview, parse_mode="HTML", reply_markup=kb)
+
         elif media_type == "video":
             await message.answer_video(media_id, caption=preview, parse_mode="HTML", reply_markup=kb)
+
+        elif media_type == "document":  # <---- ДОБАВЛЕНО!
+            await message.answer_document(media_id, caption=preview, parse_mode="HTML", reply_markup=kb)
+
         else:
             await message.answer(preview, parse_mode="HTML", reply_markup=kb)
-    except Exception:
-        await message.answer(preview, parse_mode="HTML", reply_markup=kb)
+
+    except Exception as e:
+        await message.answer(preview + f"\n⚠️ Ошибка медиа: {e}", parse_mode="HTML", reply_markup=kb)
 
     await state.set_state(ComplaintForm.confirm)
 
@@ -785,6 +794,13 @@ async def receive_solution(message: types.Message):
         f"👤 <b>Ответственный:</b> {responsible_display}\n"
         f"🕒 <b>Время решения:</b> {now}"
     )
+# --- Удаляем старое сообщение, если было ---
+    old = bot.solution_messages.get(cid)
+    if old:
+        try:
+            await bot.delete_message(old["chat_id"], old["message_id"])
+        except:
+            pass
 
     sent_full = await bot.send_message(bot.config["GROUP_SOLUTIONS_ID"], full, parse_mode="HTML")
     bot.solution_messages[cid] = {"chat_id": sent_full.chat.id, "message_id": sent_full.message_id}
