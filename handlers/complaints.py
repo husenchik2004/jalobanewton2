@@ -539,9 +539,25 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer(f"⚠️ Ошибка при отправке в группу: {e}")
         await state.update_data(sending_in_progress=False)
 
-# ==========================
-# Перезвонили — обновление и пересылка в РЕШЕНИЯ (с кнопкой "Добавить решение")
-# ==========================
+
+# ---------------------------------------------------------
+# ✔ Память решений — хранит активные решения
+# ---------------------------------------------------------
+# Структура:
+# bot.active_solutions[user_id] = {
+#     "cid": "A-12",
+#     "chat_id": -100xxxx,
+# }
+# ---------------------------------------------------------
+
+def ensure_solution_map(bot):
+    if not hasattr(bot, "active_solutions"):
+        bot.active_solutions = {}
+
+
+# ---------------------------------------------------------
+# 📞 Перезвонили — пересылка в РЕШЕНИЯ (оставляем как есть)
+# ---------------------------------------------------------
 @router.callback_query(F.data.startswith("called:"))
 async def called_handler(callback: types.CallbackQuery):
     try:
@@ -552,159 +568,117 @@ async def called_handler(callback: types.CallbackQuery):
     cid = callback.data.split(":", 1)[1]
     now = uz_time().strftime("%d.%m.%Y %H:%M")
 
-
-    # защита от двойного нажатия
-    if not hasattr(callback.bot, "_called_ids"):
-        callback.bot._called_ids = set()
+    # защита от повторов
     if cid in callback.bot._called_ids:
         await callback.answer("Уже обработано.")
         return
     callback.bot._called_ids.add(cid)
 
-    # обновляем таблицу
-    try:
-        gs = GoogleSheetsClient(
-            callback.bot.config["SERVICE_ACCOUNT_FILE"],
-            callback.bot.config["GOOGLE_SHEET_ID"]
-        )
-        gs.update_by_id(cid, {"Статус": "Принята", "Время обзвона": now})
-    except Exception as e:
-        await callback.message.answer(f"⚠️ Ошибка обновления таблицы: {e}")
-        return
+    # обновление таблицы
+    gs = GoogleSheetsClient(
+        callback.bot.config["SERVICE_ACCOUNT_FILE"],
+        callback.bot.config["GOOGLE_SHEET_ID"]
+    )
+    gs.update_by_id(cid, {"Статус": "Принята", "Время обзвона": now})
 
-    # удаляем клавиатуру
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except:
-        pass
+    # текст жалобы
+    old = callback.message.caption or callback.message.text or ""
+    updated = old + f"\n☎️ <b>Перезвонили:</b> {now}"
 
-    # обновляем подпись
-    complaint_text = callback.message.caption or callback.message.text or ""
-    new_text = complaint_text + f"\n☎️ <b>Перезвонили:</b> {now}"
-
+    # удаляем кнопку в ЖАЛОБАХ
     try:
         if callback.message.caption:
-            await callback.message.edit_caption(new_text, parse_mode="HTML")
-        elif callback.message.text:
-            await callback.message.edit_text(new_text, parse_mode="HTML")
+            await callback.message.edit_caption(updated, parse_mode="HTML", reply_markup=None)
+        else:
+            await callback.message.edit_text(updated, parse_mode="HTML", reply_markup=None)
     except:
         pass
 
+    # отправляем в РЕШЕНИЯ
     reply_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Добавить решение", callback_data=f"solution:{cid}")]
     ])
 
-    group_solutions = callback.bot.config.get("GROUP_SOLUTIONS_ID")
-    msg_to_send = f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{new_text}"
+    group_solutions = callback.bot.config["GROUP_SOLUTIONS_ID"]
+    sent = await callback.bot.send_message(
+        group_solutions,
+        f"📤 Жалоба ID {cid} передана в «РЕШЕНИЯ».\n\n{updated}",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
 
-    sent_msg = None
-    try:
-        if callback.message.photo:
-            sent_msg = await callback.bot.send_photo(
-                group_solutions,
-                callback.message.photo[-1].file_id,
-                caption=msg_to_send,
-                parse_mode="HTML",
-                reply_markup=reply_markup
-            )
-        elif getattr(callback.message, "video", None):
-            sent_msg = await callback.bot.send_video(
-                group_solutions,
-                callback.message.video.file_id,
-                caption=msg_to_send,
-                parse_mode="HTML",
-                reply_markup=reply_markup
-            )
-        else:
-            sent_msg = await callback.bot.send_message(
-                group_solutions,
-                msg_to_send,
-                parse_mode="HTML",
-                reply_markup=reply_markup
-            )
-
-        # сохраняем ID отправленного сообщения
-        if not hasattr(callback.bot, "solution_messages"):
-            callback.bot.solution_messages = {}
-        callback.bot.solution_messages[cid] = {
-            "chat_id": group_solutions,
-            "message_id": sent_msg.message_id
-        }
-
-    except Exception as e:
-        await callback.message.answer(f"⚠️ Ошибка при пересылке в группу решений: {e}")
+    # сохраняем ID сообщения
+    callback.bot.solution_messages[cid] = {"chat_id": group_solutions, "message_id": sent.message_id}
 
     await callback.answer("✅ Жалоба передана в «РЕШЕНИЯ».")
+    
 
-
-# ==========================
-# Нажали "Добавить решение" — ждем ввод текста решения
-# ==========================
+# ---------------------------------------------------------
+# 💬 Нажали «Добавить решение»
+# ---------------------------------------------------------
 @router.callback_query(F.data.startswith("solution:"))
-async def add_solution(callback: types.CallbackQuery, state: FSMContext = None):
+async def add_solution(callback: types.CallbackQuery):
+    bot = callback.bot
+    ensure_solution_map(bot)
+
     cid = callback.data.split(":")[1]
     user_id = callback.from_user.id
 
-    # создаем общий контейнер, если нет
-    if not hasattr(callback.bot, "solution_locks"):
-        callback.bot.solution_locks = {}
+    # сохраняем активное решение
+    bot.active_solutions[user_id] = {
+        "cid": cid,
+        "chat_id": callback.message.chat.id
+    }
 
-    # 🚫 Если пользователь уже нажал кнопку и бот ждет от него текст — игнорируем
-    if callback.bot.solution_locks.get(user_id):
-        await callback.answer("⏳ Вы уже добавляете решение. Завершите ввод или подождите.", show_alert=True)
-        return
-
-    # 🔐 Устанавливаем блокировку
-    callback.bot.solution_locks[user_id] = True
-
-    # ✉️ Просим текст решения
-    await callback.message.answer(f"✍️ Введите текст решения по жалобе ID {cid}:")
-
-    # 🧠 Сохраняем в состояние, кого ждем
-    callback.bot.solution_waiting[user_id] = {"cid": cid}
-
-    # ❌ Удаляем inline-кнопку "Добавить решение", чтобы её нельзя было нажать повторно
+    # удаляем кнопку
     try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-
-    # безопасно закрываем callback
-    try:
-        await callback.answer()
+        await callback.message.edit_reply_markup(None)
     except:
         pass
-# ==========================
-# Обработка текста решения — отправка в РЕШЕНИЯ и ЖАЛОБЫ
-# ==========================
-@router.message(F.text)
-async def receive_solution(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    bot = message.bot
 
-    if user_id not in bot.solution_waiting:
+    await callback.message.answer(f"✍️ Введите текст решения по жалобе ID {cid}:")
+    await callback.answer()
+
+
+# ---------------------------------------------------------
+# 💬 Принимаем текст решения
+# ---------------------------------------------------------
+@router.message(F.text)
+async def receive_solution(message: types.Message):
+    bot = message.bot
+    ensure_solution_map(bot)
+    user_id = message.from_user.id
+
+    # нет активного решения → игнор
+    if user_id not in bot.active_solutions:
         return
 
-    cid = bot.solution_waiting[user_id]["cid"]
+    entry = bot.active_solutions[user_id]
+    cid = entry["cid"]
+
+    # принимаем ТОЛЬКО в группе РЕШЕНИЯ
+    if message.chat.id != bot.config["GROUP_SOLUTIONS_ID"]:
+        return
+
     solution_text = message.text.strip()
     if len(solution_text) < 3:
-        await message.answer("❌ Решение слишком короткое, напишите подробнее.")
+        await message.answer("❌ Решение слишком короткое.")
         return
 
-    now = uz_time().strftime("%d.%m.%Y %H:%M")
-
-    responsible_name = message.from_user.full_name or "Без имени"
-    username = f"@{message.from_user.username}" if message.from_user.username else ""
-    responsible_display = f"{responsible_name} {username}".strip()
-
-    # === Обновляем данные в Google Sheets ===
+    # берём жалобу
     gs = GoogleSheetsClient(bot.config["SERVICE_ACCOUNT_FILE"], bot.config["GOOGLE_SHEET_ID"])
-    row_index, complaint = gs.get_row_by_id(cid)
+    _, complaint = gs.get_row_by_id(cid)
+
     if not complaint:
-        await message.answer(f"⚠️ Жалоба с ID {cid} не найдена в таблице.")
-        bot.solution_locks[user_id] = False
-        bot.solution_waiting.pop(user_id, None)
+        await message.answer(f"⚠️ Жалоба {cid} не найдена.")
+        bot.active_solutions.pop(user_id, None)
         return
+
+    # обновляем таблицу
+    now = uz_time().strftime("%d.%m.%Y %H:%M")
+    responsible = message.from_user.full_name or "Без имени"
+    username = f"@{message.from_user.username}" if message.from_user.username else ""
+    responsible_display = f"{responsible} {username}".strip()
 
     gs.update_by_id(cid, {
         "Решение": solution_text,
@@ -713,94 +687,75 @@ async def receive_solution(message: types.Message, state: FSMContext):
         "Статус": "Ожидает уведомления"
     })
 
-    # Берём время обзвона, если есть
+    # отправляем полное сообщение
     call_time = complaint.get("Время обзвона", "—")
 
-    # === Сообщение в группу РЕШЕНИЯ (без кнопки, оформлено красиво) ===
-    msg_text_full = (
+    full = (
         f"📤 <b>Жалоба ID {cid}</b> передана в <b>«РЕШЕНИЯ»</b>\n\n"
-        f"📋 <b>Новая жалоба</b>\n\n"
-        f"🏫 <b>Филиал:</b> {complaint.get('Филиал', '-')}\n"
-        f"👩‍👦 <b>Родитель:</b> {complaint.get('Родитель', '-')}\n"
-        f"🧒 <b>Ученик:</b> {complaint.get('Ученик', '-')}\n"
-        f"☎️ <b>Телефон:</b> {complaint.get('Телефон', '-')}\n"
-        f"📂 <b>Категория:</b> {complaint.get('Категория', '-')}\n"
-        f"✍️ <b>Жалоба:</b> {complaint.get('Жалоба', '-')}\n\n"
-        f"👤 <b>Отправитель:</b> {complaint.get('Отправитель', '-')}\n"
-        f"🆔 {complaint.get('User ID', '-')}\n"
-        f"☎️ <b>Перезвонили:</b> {call_time}\n\n"
+        f"🏫 <b>Филиал:</b> {complaint.get('Филиал')}\n"
+        f"👩‍👦 <b>Родитель:</b> {complaint.get('Родитель')}\n"
+        f"🧒 <b>Ученик:</b> {complaint.get('Ученик')}\n"
+        f"☎️ <b>Телефон:</b> {complaint.get('Телефон')}\n"
+        f"📂 <b>Категория:</b> {complaint.get('Категория')}\n"
+        f"✍️ <b>Жалоба:</b> {complaint.get('Жалоба')}\n\n"
+        f"☎️ <b>Перезвонили:</b> {call_time}\n"
         f"💬 <b>Решение:</b> {solution_text}\n"
         f"👤 <b>Ответственный:</b> {responsible_display}\n"
-        f"🕒 <b>Время решения:</b> {now}\n\n"
-        f"✅ Жалоба передана обратно в группу обзвона для уведомления родителя."
+        f"🕒 <b>Время решения:</b> {now}"
     )
 
-    group_solutions = bot.config["GROUP_SOLUTIONS_ID"]
+    sent_full = await bot.send_message(bot.config["GROUP_SOLUTIONS_ID"], full, parse_mode="HTML")
+    bot.solution_messages[cid] = {"chat_id": sent_full.chat.id, "message_id": sent_full.message_id}
 
-    # Удаляем старое сообщение, если оно было
-    if hasattr(bot, "solution_messages") and cid in bot.solution_messages:
-        old_msg = bot.solution_messages[cid]
-        try:
-            await bot.delete_message(old_msg["chat_id"], old_msg["message_id"])
-        except Exception:
-            pass
-
-    sent_msg = await bot.send_message(group_solutions, msg_text_full, parse_mode="HTML")
-    bot.solution_messages[cid] = {"chat_id": group_solutions, "message_id": sent_msg.message_id}
-
-    # === Сообщение в группу ЖАЛОБЫ (с кнопкой и коротко) ===
-    msg_text_short = (
+    # короткое сообщение в группу ЖАЛОБЫ
+    short = (
         f"📋 <b>Жалоба ID {cid}</b>\n"
-        f"💬 <b>Решение:</b> {solution_text}\n"
-        f"👤 <b>Ответственный:</b> {responsible_display}\n"
-        f"🕒 <b>Время решения:</b> {now}\n\n"
-        f"☎️ Необходимо сообщить родителю о решении жалобы."
+        f"💬 Решение: {solution_text}\n"
+        f"👤 {responsible_display}\n"
+        f"🕒 {now}"
     )
 
-    notify_button = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📨 Сообщили родителю о решении!", callback_data=f"notify_parent:{cid}")]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📨 Сообщили родителю!", callback_data=f"notify_parent:{cid}")]
     ])
-    
-    group_complaints = bot.config["GROUP_COMPLAINTS_ID"]
-    sent_complaint = await bot.send_message(group_complaints, msg_text_short, parse_mode="HTML", reply_markup=notify_button)
 
-    if not hasattr(bot, "notify_messages"):
-        bot.notify_messages = {}
-    bot.notify_messages[cid] = {"chat_id": group_complaints, "message_id": sent_complaint.message_id}
+    sent = await bot.send_message(
+        bot.config["GROUP_COMPLAINTS_ID"],
+        short,
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+    bot.notify_messages[cid] = {"chat_id": sent.chat.id, "message_id": sent.message_id}
+
+    # очистка
+    bot.active_solutions.pop(user_id, None)
 
 
-# ==========================
-# Сообщить родителю о решении — обновление сообщения
-# ==========================
+# ---------------------------------------------------------
+# 📩 Сообщили родителю
+# ---------------------------------------------------------
 @router.callback_query(F.data.startswith("notify_parent:"))
 async def notify_parent(callback: types.CallbackQuery):
     cid = callback.data.split(":")[1]
     now = uz_time().strftime("%d.%m.%Y %H:%M")
 
-    user_name = callback.from_user.full_name or "Без имени"
-    username = f"@{callback.from_user.username}" if callback.from_user.username else ""
-    display_name = f"{user_name} {username}".strip()
+    user = callback.from_user.full_name or "Без имени"
+    un = f"@{callback.from_user.username}" if callback.from_user.username else ""
+    display = f"{user} {un}".strip()
 
     gs = GoogleSheetsClient(callback.bot.config["SERVICE_ACCOUNT_FILE"], callback.bot.config["GOOGLE_SHEET_ID"])
     gs.update_by_id(cid, {
         "Статус": "Закрыта",
         "Время уведомления": now,
-        "Кто уведомил родителя": display_name
+        "Кто уведомил родителя": display
     })
 
-    # Обновляем сообщение в группе ЖАЛОБЫ
-    text = callback.message.text or callback.message.caption or ""
-    text += (
-        f"\n\n✅ <b>Родитель уведомлён:</b> {now}\n"
-        f"👤 <b>Уведомил:</b> {display_name}\n"
-        f"💚 <b>Жалоба полностью закрыта.</b>"
+    txt = callback.message.text + (
+        f"\n\n✅ <b>Родитель уведомлен:</b> {now}\n"
+        f"👤 <b>Кто уведомил:</b> {display}\n"
+        f"💚 Жалоба закрыта"
     )
 
-    try:
-        if callback.message.caption:
-            await callback.message.edit_caption(text, parse_mode="HTML", reply_markup=None)
-        else:
-            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=None)
-        await callback.answer("✅ Родителю сообщили. Жалоба закрыта.")
-    except Exception as e:
-        await callback.answer(f"⚠️ Ошибка при обновлении сообщения: {e}")
+    await callback.message.edit_text(txt, parse_mode="HTML", reply_markup=None)
+    await callback.answer("Готово!")
