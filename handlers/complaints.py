@@ -352,37 +352,47 @@ async def add_video_request(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "skip_media")
 async def skip_media_request(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Пользователь нажал «⏭ Пропустить» — просто убираем ожидание медиа
+    и показываем предпросмотр анкеты.
+    """
     user_id = callback.from_user.id
 
-    # защита от двойного нажатия — в памяти бота
+    # --- Защита от двойного клика ---
     if not hasattr(callback.bot, "_skip_cache"):
         callback.bot._skip_cache = set()
+
     key = f"skip:{user_id}"
     if key in callback.bot._skip_cache:
         try:
-            await callback.answer("Уже обрабатывается.")
+            await callback.answer("⏳ Уже обрабатываю…")
         except:
             pass
         return
+
     callback.bot._skip_cache.add(key)
 
-    # снимаем ожидание и показываем предпросмотр
+    # --- Убираем флаг ожидания медиа ---
     await state.update_data(awaiting_media=None)
+
+    # --- Показываем предпросмотр ---
     await show_complaint_preview(callback.message, state)
 
-    # убираем флаг через небольшую задержку (чтобы защитить от быстрого повторного нажатия)
-    async def _clear():
-        await asyncio.sleep(2)
-        try:
-            callback.bot._skip_cache.discard(key)
-        except:
-            pass
-    asyncio.create_task(_clear())
-
+    # --- Ответ на кнопку ---
     try:
         await callback.answer()
     except:
         pass
+
+    # --- Автоочистка флага (чтоб не блокировало клики) ---
+    async def _clear():
+        await asyncio.sleep(1.5)
+        try:
+            callback.bot._skip_cache.remove(key)
+        except:
+            pass
+
+    asyncio.create_task(_clear())
 
 
 # ==========================
