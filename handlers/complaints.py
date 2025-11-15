@@ -709,7 +709,7 @@ async def receive_solution(message: types.Message):
 
     # короткое сообщение в группу ЖАЛОБЫ
     short = (
-        "📨 <b>РЕШЕНИЕ ПО ЖАЛОБЕ ГОТОВО</b>\n\n"
+        "📨 <b>🟩🟩🟩РЕШЕНИЕ ПО ЖАЛОБЕ ГОТОВО🟩🟩🟩</b>\n\n"
         f"📘 <b>ID жалобы:</b> {cid}\n\n"
         f"💬 <b>Решение:</b> {solution_text}\n"
         f"👤 <b>Ответственный:</b> {responsible_display}\n"
@@ -718,7 +718,7 @@ async def receive_solution(message: types.Message):
     ) 
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text= "☎️ <b>Требуется уведомить родителя о принятом решении.</b>", callback_data=f"notify_parent:{cid}")]
+        [InlineKeyboardButton(text="📨 Сообщили родителю!", callback_data=f"notify_parent:{cid}")]
     ])
 
     sent = await bot.send_message(
