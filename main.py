@@ -81,7 +81,6 @@ from handlers import complaints, callbacks, statistics
 # 🔹 Храним вспомогательные данные прямо в bot
 # --------------------------------------
 bot.data = {"cancelled": {}}
-bot.solution_waiting = {}
 bot._sent_ids = set()
 bot._called_ids = set()
 bot.solution_messages = {}
