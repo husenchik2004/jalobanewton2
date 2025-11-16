@@ -831,12 +831,8 @@ async def receive_solution(message: types.Message):
 
     # удаляем старое сообщение в РЕШЕНИЯХ (если есть)
     old = bot.solution_messages.get(cid)
-    if old:
-        try:
-            await bot.delete_message(old["chat_id"], old["message_id"])
-        except:
-            pass
-# удаляем сообщение "Введите текст решения"
+        # удаляем сообщение "Введите текст решения"
+    
     if info:
         try:
             await bot.delete_message(
@@ -845,6 +841,13 @@ async def receive_solution(message: types.Message):
             )
         except:
             pass
+        
+    if old:
+        try:
+            await bot.delete_message(old["chat_id"], old["message_id"])
+        except:
+            pass
+    
 
     # отправляем новое
     sent_full = await bot.send_message(bot.config["GROUP_SOLUTIONS_ID"], full, parse_mode="HTML")
