@@ -684,6 +684,7 @@ async def called_handler(callback: types.CallbackQuery):
         + f"\n☎️ <b>Перезвонили:</b> {now}"
     )
 
+
     reply_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Добавить решение", callback_data=f"solution:{cid}")]
     ])
@@ -831,23 +832,11 @@ async def receive_solution(message: types.Message):
 
     # удаляем старое сообщение в РЕШЕНИЯХ (если есть)
     old = bot.solution_messages.get(cid)
-        # удаляем сообщение "Введите текст решения"
-    
-    if info:
-        try:
-            await bot.delete_message(
-                chat_id=message.chat.id,
-                message_id=info.get("prompt_msg_id")
-            )
-        except:
-            pass
-        
     if old:
         try:
             await bot.delete_message(old["chat_id"], old["message_id"])
         except:
             pass
-    
 
     # отправляем новое
     sent_full = await bot.send_message(bot.config["GROUP_SOLUTIONS_ID"], full, parse_mode="HTML")
