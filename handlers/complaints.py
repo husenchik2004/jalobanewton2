@@ -515,7 +515,7 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
     sender_id = callback.from_user.id
 
     msg = (
-        "<b>🟨 Новая жалоба🟨</b>\n"
+        "<b>📋 Новая жалоба</b>\n"
         f"<b>ID:</b> {complaint_id}\n\n"
         f"🏫 <b>Филиал:</b> {branch}\n"
         f"👩‍👦 <b>Родитель:</b> {parent}\n"
