@@ -593,12 +593,11 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
                 parse_mode="HTML",
                 reply_markup=kb
             )
-        # ❗ Сохраняем сообщение жалобы — необходимо для "Перезвонили"
-        bot.notify_messages[complaint_id] = {
+        # ---------- СОХРАНЯЕМ ДЛЯ "ПЕРЕЗВОНИЛИ" ----------
+        callback.bot.notify_messages[complaint_id] = {
             "chat_id": sent.chat.id,
             "message_id": sent.message_id
         }
-
 
         # Убираем клавиатуру у предпросмотра
         await callback.message.edit_reply_markup(reply_markup=None)
@@ -654,27 +653,29 @@ async def called_handler(callback: types.CallbackQuery):
     saved = bot.notify_messages.get(cid)
     if saved:
         try:
-            msg = await bot.get_message(saved["chat_id"], saved["message_id"])
-            old = msg.caption or msg.text or ""
+            chat_id = saved["chat_id"]
+            message_id = saved["message_id"]
 
+            old = callback.message.caption or callback.message.text or ""
             updated = old + f"\n☎️ <b>Перезвонили:</b> {now}"
 
-            if msg.caption:
+            if callback.message.caption:
                 await bot.edit_message_caption(
-                    chat_id=saved["chat_id"],
-                    message_id=saved["message_id"],
+                    chat_id=chat_id,
+                    message_id=message_id,
                     caption=updated,
                     reply_markup=None
                 )
             else:
                 await bot.edit_message_text(
                     updated,
-                    chat_id=saved["chat_id"],
-                    message_id=saved["message_id"],
+                    chat_id=chat_id,
+                    message_id=message_id,
                     reply_markup=None
                 )
+
         except Exception as e:
-            print("Failed to edit original message:", e)
+            print("EDIT ERROR:", e)
 
     # ---- Переслать в РЕШЕНИЯ ----
 
