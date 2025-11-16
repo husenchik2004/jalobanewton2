@@ -501,7 +501,6 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
     complaint_id = data.get("id") or f"A-{uz_time().strftime('%y%m%d%H%M%S')}"
     date_str = uz_time().strftime("%d.%m.%Y %H:%M")
 
-
     branch = data.get("branch", "-")
     parent = data.get("parent", "-")
     student = data.get("student", "-")
@@ -529,7 +528,10 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
     )
 
     try:
-        gs = GoogleSheetsClient(callback.bot.config["SERVICE_ACCOUNT_FILE"], callback.bot.config["GOOGLE_SHEET_ID"])
+        gs = GoogleSheetsClient(
+            callback.bot.config["SERVICE_ACCOUNT_FILE"],
+            callback.bot.config["GOOGLE_SHEET_ID"]
+        )
         gs.add_complaint({
             "ID": complaint_id,
             "Дата": date_str,
@@ -556,9 +558,9 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
     ])
 
     try:
-        # Фото
+        # -------- ВАЖНО: сохраняем отправленное сообщение в переменную sent --------
         if media_type == "photo":
-            await callback.bot.send_photo(
+            sent = await callback.bot.send_photo(
                 group_id,
                 media_id,
                 caption=msg,
@@ -566,9 +568,8 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
                 reply_markup=kb
             )
 
-        # Видео
         elif media_type == "video":
-            await callback.bot.send_video(
+            sent = await callback.bot.send_video(
                 group_id,
                 media_id,
                 caption=msg,
@@ -576,9 +577,8 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
                 reply_markup=kb
             )
 
-        # Файлы: JPG/PNG/PDF/HEIC/DOC — всё то, что приходит как DOCUMENT
         elif media_type == "document":
-            await callback.bot.send_document(
+            sent = await callback.bot.send_document(
                 group_id,
                 media_id,
                 caption=msg,
@@ -586,23 +586,31 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
                 reply_markup=kb
             )
 
-        # Если медиа нет — обычный текст
         else:
-            await callback.bot.send_message(
+            sent = await callback.bot.send_message(
                 group_id,
                 msg,
                 parse_mode="HTML",
                 reply_markup=kb
             )
 
-        # Убираем клавиатуру и завершаем
+        # ---------- СОХРАНЯЕМ ДЛЯ "ПЕРЕЗВОНИЛИ" ----------
+        callback.bot.notify_messages[complaint_id] = {
+            "chat_id": sent.chat.id,
+            "message_id": sent.message_id
+        }
+
+        # Убираем клавиатуру у предпросмотра
         await callback.message.edit_reply_markup(reply_markup=None)
+
         await callback.message.answer("✅ Жалоба успешно отправлена и сохранена.", reply_markup=main_menu_kb())
+
         await state.clear()
 
     except Exception as e:
         await callback.message.answer(f"⚠️ Ошибка при отправке в группу: {e}")
         await state.update_data(sending_in_progress=False)
+
 # ---------------------------------------------------------
 # ✔ Память решений — хранит активные решения
 # ---------------------------------------------------------
