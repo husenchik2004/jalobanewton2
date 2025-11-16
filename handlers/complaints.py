@@ -678,9 +678,11 @@ async def called_handler(callback: types.CallbackQuery):
             print("EDIT ERROR:", e)
 
     # ---- Переслать в РЕШЕНИЯ ----
-
-    updated = (callback.message.caption or callback.message.text or "") + \
-              f"\n☎️ <b>Перезвонили:</b> {now}"
+    updated = (
+        "🟨 <b>Новая жалоба — ожидает решения</b>\n\n"
+        + (callback.message.caption or callback.message.text or "")
+        + f"\n☎️ <b>Перезвонили:</b> {now}"
+    )
 
     reply_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Добавить решение", callback_data=f"solution:{cid}")]
@@ -832,6 +834,15 @@ async def receive_solution(message: types.Message):
     if old:
         try:
             await bot.delete_message(old["chat_id"], old["message_id"])
+        except:
+            pass
+# удаляем сообщение "Введите текст решения"
+    if info:
+        try:
+            await bot.delete_message(
+                chat_id=message.chat.id,
+                message_id=info.get("prompt_msg_id")
+            )
         except:
             pass
 
