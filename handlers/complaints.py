@@ -708,6 +708,9 @@ async def called_handler(callback: types.CallbackQuery):
 # ---------------------------------------------------------
 # 💬 Нажали «Добавить решение»
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 💬 Нажали «Добавить решение»
+# ---------------------------------------------------------
 @router.callback_query(F.data.startswith("solution:"))
 async def add_solution(callback: types.CallbackQuery):
     bot = callback.bot
@@ -728,8 +731,19 @@ async def add_solution(callback: types.CallbackQuery):
     except:
         pass
 
-    await callback.message.answer(f"✍️ Введите текст решения по жалобе ID {cid}:")
+    # отправляем сообщение "Введите текст решения"
+    prompt_msg = await callback.message.answer(
+        f"✍️ Введите текст решения по жалобе ID {cid}:"
+    )
+
+    # сохраняем message_id этого сообщения
+    bot.solution_waiting[user_id] = {
+        "cid": cid,
+        "prompt_msg_id": prompt_msg.message_id
+    }
+
     await callback.answer()
+
 
 # ---------------------------------------------------------
 # 💬 Принимаем текст решения
@@ -752,13 +766,7 @@ async def receive_solution(message: types.Message):
         return
 
     # --- Удаляем сообщение "Введите текст решения" ---
-    try:
-        await bot.delete_message(
-            chat_id=message.chat.id,
-            message_id=message.message_id - 1
-        )
-    except:
-        pass
+
 
     # --- Удаляем сообщение пользователя с решением ---
     try:
@@ -856,6 +864,7 @@ async def receive_solution(message: types.Message):
 
     # очистка
     bot.active_solutions.pop(user_id, None)
+
 
 # ---------------------------------------------------------
 # 📩 Сообщили родителю
