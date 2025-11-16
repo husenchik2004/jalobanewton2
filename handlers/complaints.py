@@ -751,8 +751,12 @@ async def add_solution(callback: types.CallbackQuery):
 # ---------------------------------------------------------
 # 💬 Принимаем текст решения
 # ---------------------------------------------------------
-@router.message(F.text)
+@router.message(
+    F.text,
+    F.chat.id == message.bot.config["GROUP_SOLUTIONS_ID"]
+)
 async def receive_solution(message: types.Message):
+
     bot = message.bot
     ensure_solution_map(bot)
     user_id = message.from_user.id
