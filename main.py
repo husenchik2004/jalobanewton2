@@ -1,6 +1,7 @@
 import json
 import os
-# Создаем файл service_account.json на Railway
+
+# Создаём service_account.json на Railway
 if os.getenv("SERVICE_ACCOUNT_JSON"):
     with open("service_account.json", "w") as f:
         f.write(os.getenv("SERVICE_ACCOUNT_JSON"))
@@ -10,7 +11,6 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
-from aiogram import Router
 from scheduler import start_scheduler
 
 # ======================================
@@ -28,9 +28,12 @@ SERVICE_ACCOUNT_FILE = "service_account.json"
 TIMEZONE = "Asia/Tashkent"
 
 # ======================================
-# 🔇 ЛОГИ (чистый вывод)
+# 🔇 ЛОГИ
 # ======================================
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logging.getLogger("aiogram.event").setLevel(logging.ERROR)
 logging.getLogger("aiogram.dispatcher").setLevel(logging.ERROR)
 logging.getLogger("aiogram").setLevel(logging.INFO)
@@ -44,7 +47,7 @@ bot = Bot(
 )
 
 # ======================================
-# 🔒 Менеджер блокировок
+# 🔒 МЕНЕДЖЕР БЛОКИРОВОК
 # ======================================
 class LockManager:
     def __init__(self):
@@ -73,23 +76,26 @@ bot.lock_manager = LockManager()
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# Импорт хендлеров (ПОСЛЕ инициализации dp!)
-from handlers import complaints, callbacks, statistics
+# Импорт хендлеров
+from handlers import complaints, statistics
 
+# Подключаем ТОЛЬКО рабочие роутеры
+dp.include_router(complaints.router)
+dp.include_router(statistics.router)
 
 # --------------------------------------
-# 🔹 Храним вспомогательные данные прямо в bot
+# 🔹 Данные в bot
 # --------------------------------------
 bot.data = {"cancelled": {}}
 bot._sent_ids = set()
 bot._called_ids = set()
 bot.solution_messages = {}
 bot.notify_messages = {}
-bot.active_solutions = {}              # <- чтобы не падало в receive_solution
-bot.solution_waiting = {}              # <- дублируем для безопасности
+bot.active_solutions = {}
+bot.solution_waiting = {}
 
 # --------------------------------------
-# 🔹 Общая конфигурация (для всех модулей)
+# 🔹 Общая конфигурация
 # --------------------------------------
 bot.config = {
     "GROUP_COMPLAINTS_ID": GROUP_COMPLAINTS_ID,
@@ -98,25 +104,17 @@ bot.config = {
     "GOOGLE_SHEET_ID": GOOGLE_SHEET_ID,
     "SERVICE_ACCOUNT_FILE": SERVICE_ACCOUNT_FILE,
     "TIMEZONE": TIMEZONE,
-    "ADMINS": [ 1450296021, 420533161 ]  
+    "ADMINS": [1450296021, 420533161]
 }
 
 # ======================================
-# 🚀 ОСНОВНОЙ ЗАПУСК
+# 🚀 ЗАПУСК
 # ======================================
 async def main():
-    # подключаем router'ы безопасно
-    if complaints.router.parent_router is None:
-        dp.include_router(complaints.router)
-    if callbacks.router.parent_router is None:
-        dp.include_router(callbacks.router)
-    if statistics.router.parent_router is None:
-        dp.include_router(statistics.router)
-
-    # глобальные обработчики ошибок
+    # обработчик ошибок
     try:
         dp.errors.register(complaints.errors_handler)
-    except AttributeError:
+    except:
         pass
 
     # запуск планировщика
@@ -136,7 +134,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         print("🛑 Бот остановлен вручную")
-
-
-
-

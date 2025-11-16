@@ -593,12 +593,12 @@ async def confirm_send(callback: types.CallbackQuery, state: FSMContext):
                 parse_mode="HTML",
                 reply_markup=kb
             )
-
-        # ---------- СОХРАНЯЕМ ДЛЯ "ПЕРЕЗВОНИЛИ" ----------
-        callback.bot.notify_messages[complaint_id] = {
+        # ❗ Сохраняем сообщение жалобы — необходимо для "Перезвонили"
+        bot.notify_messages[complaint_id] = {
             "chat_id": sent.chat.id,
             "message_id": sent.message_id
         }
+
 
         # Убираем клавиатуру у предпросмотра
         await callback.message.edit_reply_markup(reply_markup=None)
