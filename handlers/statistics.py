@@ -22,7 +22,7 @@ def generate_summary(df):
     branch_counts = df["Филиал"].value_counts()
     max_branch = branch_counts.idxmax()
     min_branch = branch_counts.idxmin()
-    last_date = pd.to_datetime(df["Дата"], errors="coerce").max().strftime("%d.%m.%Y")
+    last_date = pd.to_datetime(df["Дата"], errors="coerce", dayfirst=True).max().strftime("%d.%m.%Y")
 
     return (
         f"\n━━━━━━━━━━━━━━━━━━━\n"
@@ -201,7 +201,8 @@ async def stats_by_category(callback: types.CallbackQuery):
     most_count = cat_summary[most_complaints_cat]
     least_count = cat_summary[least_complaints_cat]
 
-    df["Дата"] = pd.to_datetime(df["Дата"], errors="coerce")
+    df["Дата"] = pd.to_datetime(df["Дата"], errors="coerce", dayfirst=True)
+
     last_date = df["Дата"].max().strftime("%d.%m.%Y")
 
     text += (
@@ -228,7 +229,8 @@ async def stats_by_date(callback: types.CallbackQuery):
         await callback.message.answer("⚠️ Нет данных по датам.")
         return
 
-    df["Дата"] = pd.to_datetime(df["Дата"], errors="coerce")
+    df["Дата"] = pd.to_datetime(df["Дата"], errors="coerce", dayfirst=True)
+
     last_7 = df[df["Дата"] >= datetime.now() - pd.Timedelta(days=7)]
 
     total = len(last_7)
